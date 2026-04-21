@@ -449,9 +449,11 @@ class TwitterSimulationRunner:
         if not os.environ.get("OPENAI_API_KEY"):
             raise ValueError("Missing API Key configuration, please set LLM_API_KEY in .env file in project root")
         
-        if llm_base_url:
+        # For Azure, OPENAI_API_BASE_URL must point to the deployment URL (set in .env).
+        # Overwriting with LLM_BASE_URL would give the wrong resource-only endpoint.
+        if llm_base_url and not os.environ.get("AZURE_API_VERSION"):
             os.environ["OPENAI_API_BASE_URL"] = llm_base_url
-        
+
         print(f"LLM configuration: model={llm_model}, base_url={llm_base_url[:40] if llm_base_url else 'default'}...")
         
         return ModelFactory.create(

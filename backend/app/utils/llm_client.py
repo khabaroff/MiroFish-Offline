@@ -8,7 +8,7 @@ import json
 import os
 import re
 from typing import Optional, Dict, Any, List
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 
 from ..config import Config
 
@@ -30,19 +30,29 @@ class LLMClient:
         if not self.api_key:
             raise ValueError("LLM_API_KEY not configured")
 
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            timeout=timeout,
-        )
+        azure_version = Config.AZURE_API_VERSION
+        if azure_version:
+            self.client = AzureOpenAI(
+                azure_endpoint=self.base_url,
+                api_key=self.api_key,
+                api_version=azure_version,
+                timeout=timeout,
+            )
+            self._azure = True
+        else:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=timeout,
+            )
+            self._azure = False
 
-        # Ollama context window size — prevents prompt truncation.
-        # Read from env OLLAMA_NUM_CTX, default 8192 (Ollama default is only 2048).
+        # Ollama context window size — only used when talking to Ollama.
         self._num_ctx = int(os.environ.get('OLLAMA_NUM_CTX', '8192'))
 
     def _is_ollama(self) -> bool:
         """Check if we're talking to an Ollama server."""
-        return '11434' in (self.base_url or '')
+        return not self._azure and '11434' in (self.base_url or '')
 
     def chat(
         self,

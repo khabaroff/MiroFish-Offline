@@ -37,9 +37,15 @@ class Config:
     NEO4J_USER = os.environ.get('NEO4J_USER', 'neo4j')
     NEO4J_PASSWORD = os.environ.get('NEO4J_PASSWORD', 'mirofish')
 
+    # Azure OpenAI
+    AZURE_API_VERSION = os.environ.get('AZURE_API_VERSION')
+
     # Embedding configuration
     EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'nomic-embed-text')
     EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL', 'http://localhost:11434')
+    # Azure embedding (overrides EMBEDDING_MODEL / EMBEDDING_BASE_URL when set)
+    LLM_EMBEDDING_MODEL_NAME = os.environ.get('LLM_EMBEDDING_MODEL_NAME')
+    LLM_EMBEDDING_API_VERSION = os.environ.get('LLM_EMBEDDING_API_VERSION')
 
     # File upload configuration
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
