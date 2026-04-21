@@ -59,3 +59,4 @@ backend/uploads/
 # Docker 数据
 data/backend/venv311/
 backend/venv311/
+.worktrees/
