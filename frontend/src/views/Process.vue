@@ -564,18 +564,26 @@ const initProject = async () => {
   }
 }
 
+const ONTOLOGY_LOCK_KEY = 'mirofish_ontology_lock'
+
 // Handle new project - call ontology/generate API
 const handleNewProject = async () => {
+  // Persist-safe guard: survives page refresh via sessionStorage
+  if (sessionStorage.getItem(ONTOLOGY_LOCK_KEY)) return
+  sessionStorage.setItem(ONTOLOGY_LOCK_KEY, '1')
+
   const pending = getPendingUpload()
 
   if (!pending.isPending || pending.files.length === 0) {
     error.value = 'No files pending upload. Please go back to home and try again.'
     loading.value = false
+    sessionStorage.removeItem(ONTOLOGY_LOCK_KEY)
     return
   }
 
   try {
     loading.value = true
+    error.value = '' // clear any previous error
     currentPhase.value = 0 // Ontology generation phase
     ontologyProgress.value = { message: 'Uploading files and analyzing documents...' }
 
@@ -590,7 +598,7 @@ const handleNewProject = async () => {
     const response = await generateOntology(formDataObj)
 
     if (response.success) {
-      // Clear pending upload data
+      // Clear pending upload data only after success
       clearPendingUpload()
 
       // Update project ID and data
@@ -615,6 +623,7 @@ const handleNewProject = async () => {
     error.value = 'Project initialization failed: ' + (err.message || 'Unknown error')
   } finally {
     loading.value = false
+    sessionStorage.removeItem(ONTOLOGY_LOCK_KEY)
   }
 }
 

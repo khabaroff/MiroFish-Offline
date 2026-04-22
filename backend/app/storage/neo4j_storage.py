@@ -6,11 +6,23 @@ Includes: CRUD, NER/RE-based text ingestion, hybrid search, retry logic.
 """
 
 import json
+import os
 import time
 import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Callable
+
+_GRAPH_LOG_PATH = '/app/logs/graph_events.jsonl'
+
+
+def _append_graph_log(record: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_GRAPH_LOG_PATH), exist_ok=True)
+        with open(_GRAPH_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
 
 from neo4j import GraphDatabase, Session as Neo4jSession
 from neo4j.exceptions import (
@@ -173,8 +185,13 @@ class Neo4jStorage(GraphStorage):
     # Add data (NER → nodes/edges)
     # ----------------------------------------------------------------
 
-    def add_text(self, graph_id: str, text: str) -> str:
-        """Process text: NER/RE → batch embed → create nodes/edges → return episode_id."""
+    def add_text(
+        self,
+        graph_id: str,
+        text: str,
+        known_entities: Optional[List[Dict[str, str]]] = None,
+    ) -> tuple:
+        """Process text: NER/RE → batch embed → create nodes/edges → return (episode_id, extracted_entities)."""
         episode_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
@@ -182,8 +199,8 @@ class Neo4jStorage(GraphStorage):
         ontology = self.get_ontology(graph_id)
 
         # Extract entities and relations
-        logger.info(f"[add_text] Starting NER extraction for chunk ({len(text)} chars)...")
-        extraction = self._ner.extract(text, ontology)
+        logger.info(f"[add_text] Starting NER extraction for chunk ({len(text)} chars), known_entities={len(known_entities or [])}...")
+        extraction = self._ner.extract(text, ontology, known_entities=known_entities)
         entities = extraction.get("entities", [])
         relations = extraction.get("relations", [])
 
@@ -347,7 +364,21 @@ class Neo4jStorage(GraphStorage):
                 self._call_with_retry(session.execute_write, _create_relation)
 
         logger.info(f"[add_text] Chunk done: episode={episode_id}")
-        return episode_id
+
+        # Save graph events to disk for analysis
+        if entities or relations:
+            _append_graph_log({
+                "ts": now,
+                "graph_id": graph_id,
+                "episode_id": episode_id,
+                "text_snippet": text[:300],
+                "nodes": [{"name": e["name"], "type": e["type"], "attributes": e.get("attributes", {})} for e in entities],
+                "edges": [{"source": r["source"], "target": r["target"], "type": r["type"], "fact": r["fact"]} for r in relations],
+            })
+
+        # Return episode_id and extracted entity names for cross-chunk relations
+        extracted = [{"name": e["name"], "type": e["type"]} for e in entities]
+        return episode_id, extracted
 
     def add_text_batch(
         self,
@@ -363,7 +394,7 @@ class Neo4jStorage(GraphStorage):
         for i, chunk in enumerate(chunks):
             if not chunk or not chunk.strip():
                 continue
-            episode_id = self.add_text(graph_id, chunk)
+            episode_id, _extracted = self.add_text(graph_id, chunk)
             episode_ids.append(episode_id)
 
             if progress_callback:

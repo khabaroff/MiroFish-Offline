@@ -191,6 +191,7 @@ class GraphBuilderService:
     ) -> List[str]:
         """Add text in batches to graph, return uuid list of all episodes"""
         episode_uuids = []
+        known_entities: List[Dict[str, str]] = []  # Accumulate entities across chunks
         total_chunks = len(chunks)
         total_batches = (total_chunks + batch_size - 1) // batch_size
 
@@ -216,11 +217,20 @@ class GraphBuilderService:
                 )
                 t0 = time.time()
                 try:
-                    episode_id = self.storage.add_text(graph_id, chunk)
+                    episode_id, extracted = self.storage.add_text(
+                        graph_id, chunk, known_entities=known_entities
+                    )
                     episode_uuids.append(episode_id)
+                    # Accumulate known entities for cross-chunk relation extraction
+                    seen = {e["name"].lower() for e in known_entities}
+                    for ent in extracted:
+                        if ent["name"].lower() not in seen:
+                            known_entities.append(ent)
+                            seen.add(ent["name"].lower())
                     elapsed = time.time() - t0
                     logger.info(
-                        f"[graph_build] Chunk {chunk_idx}/{total_chunks} done in {elapsed:.1f}s"
+                        f"[graph_build] Chunk {chunk_idx}/{total_chunks} done in {elapsed:.1f}s "
+                        f"(known_entities={len(known_entities)})"
                     )
                 except Exception as e:
                     elapsed = time.time() - t0

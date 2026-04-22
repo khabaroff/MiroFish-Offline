@@ -320,7 +320,7 @@ class GraphMemoryUpdater:
 
         for attempt in range(self.MAX_RETRIES):
             try:
-                self.storage.add_text(self.graph_id, combined_text)
+                self.storage.add_text(self.graph_id, combined_text)  # ignore returned entities
 
                 self._total_sent += 1
                 self._total_items_sent += len(activities)

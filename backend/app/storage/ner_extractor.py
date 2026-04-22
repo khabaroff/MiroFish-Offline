@@ -6,12 +6,17 @@ Uses LLMClient.chat_json() with a structured prompt to extract
 entities and relations from text chunks, guided by the graph's ontology.
 """
 
+import json
 import logging
+import os
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from ..utils.llm_client import LLMClient
 
 logger = logging.getLogger('mirofish.ner_extractor')
+
+_NER_LOG_PATH = '/app/logs/ner_responses.jsonl'
 
 # System prompt template for NER/RE extraction
 _SYSTEM_PROMPT = """You are a Named Entity Recognition and Relation Extraction system.
@@ -20,13 +25,16 @@ Given a text and an ontology (entity types + relation types), extract all entiti
 ONTOLOGY:
 {ontology_description}
 
+{known_entities_section}
+
 RULES:
 1. Only extract entity types and relation types defined in the ontology.
 2. Normalize entity names: strip whitespace, use canonical form (e.g., "Jack Ma" not "ma jack").
 3. Each entity must have: name, type (from ontology), and optional attributes.
 4. Each relation must have: source entity name, target entity name, type (from ontology), and a fact sentence describing the relationship.
 5. If no entities or relations are found, return empty lists.
-6. Be precise — only extract what is explicitly stated or strongly implied in the text.
+6. Extract both explicit and implied relations. If the text discusses an entity in the context of another known entity (e.g., a parent segment discussing a product), create a relation between them.
+7. When known entities from previous chunks are provided, actively look for relations between entities in the current text and those known entities. This is critical for building a connected graph.
 
 Return ONLY valid JSON in this exact format:
 {{
@@ -50,13 +58,20 @@ class NERExtractor:
         self.llm = llm_client or LLMClient()
         self.max_retries = max_retries
 
-    def extract(self, text: str, ontology: Dict[str, Any]) -> Dict[str, Any]:
+    def extract(
+        self,
+        text: str,
+        ontology: Dict[str, Any],
+        known_entities: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
         """
         Extract entities and relations from text, guided by ontology.
 
         Args:
             text: Input text chunk
             ontology: Dict with 'entity_types' and 'relation_types' from graph
+            known_entities: List of previously extracted entities [{"name": ..., "type": ...}]
+                           Used to build cross-chunk relations.
 
         Returns:
             Dict with 'entities' and 'relations' lists:
@@ -69,7 +84,11 @@ class NERExtractor:
             return {"entities": [], "relations": []}
 
         ontology_desc = self._format_ontology(ontology)
-        system_msg = _SYSTEM_PROMPT.format(ontology_description=ontology_desc)
+        known_section = self._format_known_entities(known_entities)
+        system_msg = _SYSTEM_PROMPT.format(
+            ontology_description=ontology_desc,
+            known_entities_section=known_section,
+        )
         user_msg = _USER_PROMPT.format(text=text.strip())
 
         messages = [
@@ -85,6 +104,17 @@ class NERExtractor:
                     temperature=0.1,  # Low temp for extraction precision
                     max_tokens=4096,
                 )
+                # Save raw LLM response for analysis
+                try:
+                    with open(_NER_LOG_PATH, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({
+                            "ts": datetime.utcnow().isoformat(),
+                            "text_snippet": text[:200],
+                            "known_entities_count": len(known_entities) if known_entities else 0,
+                            "result": result,
+                        }, ensure_ascii=False) + '\n')
+                except Exception:
+                    pass
                 return self._validate_and_clean(result, ontology)
 
             except ValueError as e:
@@ -102,6 +132,18 @@ class NERExtractor:
             f"NER extraction failed after {self.max_retries + 1} attempts: {last_error}"
         )
         return {"entities": [], "relations": []}
+
+    def _format_known_entities(self, known_entities: Optional[List[Dict[str, str]]]) -> str:
+        """Format known entities into a section for the system prompt."""
+        if not known_entities:
+            return ""
+
+        lines = ["KNOWN ENTITIES FROM PREVIOUS CHUNKS (use these to build relations with entities in the current text):"]
+        for e in known_entities:
+            lines.append(f"  - {e['name']} ({e.get('type', 'Entity')})")
+        lines.append("")
+        lines.append("If the current text mentions or discusses any of these known entities, create relations between them and entities found in the current text.")
+        return "\n".join(lines)
 
     def _format_ontology(self, ontology: Dict[str, Any]) -> str:
         """Format ontology dict into readable text for the LLM prompt."""

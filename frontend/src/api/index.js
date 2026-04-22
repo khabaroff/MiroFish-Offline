@@ -3,7 +3,7 @@ import axios from 'axios'
 // Create axios instance
 const service = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001',
-  timeout: 300000, // 5 minute timeout (ontology generation may require longer time)
+  timeout: 1800000, // 30 minute timeout (LLM reasoning models may take 10+ minutes)
   headers: {
     'Content-Type': 'application/json'
   }

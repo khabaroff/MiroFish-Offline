@@ -14,6 +14,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./backend/uploads:/app/backend/uploads
+      - ../MiroFish-Logs:/app/logs
     depends_on:
       neo4j:
         condition: service_healthy
